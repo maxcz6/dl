@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "agentic-microservice-deployer": {
+      "source": "kevinrivm/agentic-microservice-deployer",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "3b7da4bba2711d3b8d09e6dbecee50e914807b00f54ab1559cbf2c76933c1317"
+    }
+  }
+}

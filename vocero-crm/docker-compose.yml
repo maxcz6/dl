@@ -1,0 +1,183 @@
+# ============================================================
+# Vocero CRM — Ruta B: app + Postgres + Caddy (HTTPS automático)
+# Uso:        pnpm init-env --domain tu.dominio  →  pnpm doctor  →  docker compose up -d
+#             (sin Node: cp .env.example .env y rellenar a mano)
+# Actualizar: git pull  →  docker compose up -d
+#
+# La app sale de la imagen publicada de la versión (una por tag vX.Y.Z). Con
+# `image` y `build` juntos y sin `pull_policy`, Compose intenta primero
+# descargar la imagen y solo la construye desde este repo si no la encuentra
+# ni en el registro ni en tu máquina (especificación de Compose, «Using build
+# and image»: docs.docker.com/reference/compose-file/build/):
+#
+#   docker compose up -d           la imagen publicada
+#   docker compose up -d --build   construida desde el código (la publicada
+#                                  es linux/amd64: en un VPS ARM, construye)
+#
+# Lo que construyes queda en tu máquina con este mismo nombre de imagen. En un
+# fork con cambios propios usa siempre --build (o cambia `image:` por un
+# nombre tuyo): sin él, Compose puede correr la imagen oficial en vez de tus
+# cambios. Otra versión publicada: VOCERO_CRM_VERSION=X.Y.Z en tu .env.
+#
+# 2.0 — El agente (Nea) es un servicio al lado del CRM, sobre la MISMA base
+# en su esquema `nea`, y se levanta con todo lo demás. El CRM le despacha cada
+# ráfaga a http://nea:8000 y Nea contesta por /api/bot/*, con la BOT_API_KEY
+# del .env (`pnpm init-env` la genera). Nea no lleva llave de IA: piensa por
+# el CRM con la de Ajustes → IA (036). Para conectar otro cerebro, cambia
+# BRAIN_DISPATCH_URL y BRAIN_HEALTH_URL en el .env; para no usar ninguno
+# (bandeja manual), déjalas vacías: BRAIN_DISPATCH_URL= y BRAIN_HEALTH_URL=.
+# Guía: docs/migrar-a-2.0.md.
+#
+# 037 — Adjuntos en un bucket S3-compatible (opcional; por defecto, el volumen
+# de abajo). Con MEDIA_STORE=bucket y las MEDIA_BUCKET_* en el .env, el perfil
+# `bucket` levanta un MinIO propio en este mismo servidor:
+#
+#   docker compose --profile bucket up -d
+#
+# Para un bucket de fuera (R2, S3, Backblaze) no hace falta el perfil: basta
+# con las variables. Guía: README, «Adjuntos en un bucket».
+# ============================================================
+services:
+  app:
+    image: ghcr.io/kevinrivm/vocero-crm:${VOCERO_CRM_VERSION:-2.0.0}
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_BASE_URL: ${APP_BASE_URL}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/vocero
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v25.0}
+      OPENROUTER_API_TOKEN: ${OPENROUTER_API_TOKEN:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      OPENROUTER_JUDGE_MODEL: ${OPENROUTER_JUDGE_MODEL:-}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-}
+      AGENT_COALESCE_MS: ${AGENT_COALESCE_MS:-6000}
+      # Opcionales: vacías = apagadas (guía de cada una en .env.example).
+      CHANNELS: ${CHANNELS:-}
+      AGENDA: ${AGENDA:-}
+      ATRIBUCION: ${ATRIBUCION:-}
+      BOT_API_KEY: ${BOT_API_KEY:-}
+      # 2.0 — El cerebro: por defecto, el servicio `nea` de abajo. Con la
+      # variable definida pero vacía en el .env, ninguno (bandeja manual).
+      BRAIN_HEALTH_URL: ${BRAIN_HEALTH_URL-http://nea:8000/health}
+      BRAIN_DISPATCH_URL: ${BRAIN_DISPATCH_URL-http://nea:8000/vocero/dispatch}
+      # 037 — Vacía = disco. `bucket` + las MEDIA_BUCKET_* = el bucket; con el
+      # perfil `bucket`, MEDIA_BUCKET_ENDPOINT=http://minio:9000.
+      MEDIA_STORE: ${MEDIA_STORE:-}
+      MEDIA_BUCKET_ENDPOINT: ${MEDIA_BUCKET_ENDPOINT:-}
+      MEDIA_BUCKET_NAME: ${MEDIA_BUCKET_NAME:-}
+      MEDIA_BUCKET_REGION: ${MEDIA_BUCKET_REGION:-us-east-1}
+      MEDIA_BUCKET_KEY_ID: ${MEDIA_BUCKET_KEY_ID:-}
+      MEDIA_BUCKET_SECRET: ${MEDIA_BUCKET_SECRET:-}
+    volumes:
+      # Adjuntos, logo e icono (la imagen ya trae MEDIA_DIR=/data/media): sin
+      # este volumen se pierden al recrear el contenedor.
+      - vocero_app_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # el HEALTHCHECK vive en el Dockerfile (/api/health)
+
+  # 035 — El agente. Misma base que el CRM, en su esquema `nea`: el par no
+  # pide una segunda base. La llave del despacho es BOT_API_KEY, la misma
+  # con la que Nea le contesta al CRM. Sin dominio público: el CRM le habla
+  # por la red interna.
+  nea:
+    image: ghcr.io/kevinrivm/nea-agent:${NEA_VERSION:-2.0.0}
+    restart: unless-stopped
+    environment:
+      CRM_BASE_URL: http://app:3000
+      CRM_BOT_API_KEY: ${BOT_API_KEY:-}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/vocero
+      DATABASE_SCHEMA: nea
+      # 036 — Sin LLM_API_KEY: Nea piensa por el CRM (/api/bot/llm) con la
+      # llave de Ajustes → IA y el modelo que elegiste ahí. Este es solo el
+      # de respaldo, si el CRM todavía no tiene modelo.
+      LLM_MODEL: ${OPENROUTER_MODEL:-z-ai/glm-5.3-flash}
+      # Mientras pruebas: tu número. Vacía = Nea le contesta a todos.
+      ALLOWED_WA_IDS: ${ALLOWED_WA_IDS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: vocero
+    volumes:
+      - vocero_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vocero"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # 037 — El bucket propio, en este mismo servidor y sin puertos públicos: el
+  # CRM le habla por la red interna. Sus llaves de administrador son las
+  # MEDIA_BUCKET_KEY_ID y MEDIA_BUCKET_SECRET del .env (la secreta, 8+
+  # caracteres). Los archivos viven en su volumen.
+  minio:
+    # La de Coolify: las imágenes oficiales de MinIO dejaron Docker Hub. Trae
+    # `mc` adentro, que usa el contenedor de abajo.
+    image: coollabsio/minio:RELEASE.2025-10-15T17-29-55Z
+    profiles: ["bucket"]
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_BUCKET_KEY_ID:-}
+      MINIO_ROOT_PASSWORD: ${MEDIA_BUCKET_SECRET:-}
+    volumes:
+      - vocero_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Crea el bucket una vez (si ya existe, no hace nada) y termina.
+  minio-bucket:
+    image: coollabsio/minio:RELEASE.2025-10-15T17-29-55Z
+    profiles: ["bucket"]
+    restart: "no"
+    environment:
+      KEY_ID: ${MEDIA_BUCKET_KEY_ID:-}
+      SECRET: ${MEDIA_BUCKET_SECRET:-}
+      BUCKET: ${MEDIA_BUCKET_NAME:-vocero}
+    entrypoint: ["/bin/sh", "-c", "mc alias set local http://minio:9000 \"$$KEY_ID\" \"$$SECRET\" && mc mb --ignore-existing \"local/$$BUCKET\""]
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - vocero_caddy_data:/data
+      - vocero_caddy_config:/config
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  vocero_pg:
+  vocero_app_data:
+  vocero_minio:
+  vocero_caddy_data:
+  vocero_caddy_config:

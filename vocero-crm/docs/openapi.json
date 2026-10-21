@@ -1,0 +1,316 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Vocero CRM — API de servicio del cerebro",
+    "version": "2.0.0",
+    "description": "El contrato entre Vocero CRM y su cerebro (Nea u otro). Dos mitades: el CRM le DESPACHA a tu cerebro cada ráfaga del cliente (sección `webhooks`), y tu cerebro contesta por `/api/bot/*` (sección `paths`).\n\nRegla de versión: agregar una llave o una ruta cabe en cualquier versión; quitar o renombrar una es una versión mayor. Ignora las llaves que no conozcas.\n\nCambios de contrato de la 2.0: `POST /api/bot/llm/{ruta}` y `llm` en el perfil (036); `adOrigen` en el contexto (031); `fileName`, `location` y `contacts` en los mensajes del despacho (031); `conversation.test` en el despacho y `/api/bot/messages` guardando las respuestas de prueba (033); `role` y `tools` en el perfil (034); `POST /api/bot/stage`, `lead.nextStages` en el contexto y la herramienta `etapa` (038).\n\nLa forma exacta del despacho y del aviso de olvido está fijada byte a byte en pruebas gemelas de los dos repositorios: `tests/unit/despacho-contrato.test.ts` y `tests/unit/olvido-contrato.test.ts` aquí, `tests/test_despacho_raiz.py` y `tests/test_olvido.py` en nea-agent. Guía de migración: `docs/migrar-a-2.0.md`.",
+    "license": { "name": "MIT" }
+  },
+  "servers": [{ "url": "https://tu-crm.example.com" }],
+  "security": [{ "botKey": [] }],
+  "paths": {
+    "/api/bot/context": {
+      "get": {
+        "summary": "Contexto de una conversación",
+        "description": "Lo que solo el CRM sabe: quién es la persona, su etapa, si una persona tomó la conversación, si la ventana sigue abierta, de qué anuncio llegó y (con la agenda encendida) sus citas. No trae el historial: el cerebro lleva su propia memoria. Por `conversationId` (recomendado: es el que trae el despacho) o por `identity`.",
+        "parameters": [
+          { "name": "conversationId", "in": "query", "schema": { "type": "string" } },
+          { "name": "identity", "in": "query", "description": "Teléfono normalizado, `bsuid:<id>`, `ig:<id>`, `fb:<id>` o `tt:<id>`.", "schema": { "type": "string" } },
+          { "name": "waIdentity", "in": "query", "description": "Alias heredado de `identity`.", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Contexto", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Contexto" } } } },
+          "404": { "$ref": "#/components/responses/NoEncontrada" },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      }
+    },
+    "/api/bot/messages": {
+      "post": {
+        "summary": "Contestarle al cliente",
+        "description": "Sale por el mismo camino que la bandeja y queda marcado como IA. El CRM adapta el texto al canal (en Instagram, Messenger y TikTok le quita el formato). En una conversación de prueba del Laboratorio (`conversation.test` del despacho) la respuesta se GUARDA en el hilo y no se envía.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId", "text"], "properties": { "conversationId": { "type": "string" }, "text": { "type": "string", "minLength": 1 } } } } } },
+        "responses": {
+          "200": { "description": "Enviado (o guardado, en una de prueba)", "content": { "application/json": { "schema": { "type": "object", "properties": { "messageId": { "type": "string" }, "status": { "type": "string", "enum": ["sent"] } }, "required": ["messageId"] } } } },
+          "404": { "$ref": "#/components/responses/NoEncontrada" },
+          "409": { "description": "`ai_paused`: una persona tomó la conversación (no insistas). `window_closed`: la ventana del canal cerró. `message_limit`: el canal no admite más hasta que el cliente escriba (TikTok). `sandbox_violation`: reservado. `no_org`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "$ref": "#/components/responses/Invalido" },
+          "502": { "description": "El canal (Meta o Zernio) rechazó el envío.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        },
+        "x-codigos-409": ["ai_paused", "window_closed", "sandbox_violation", "message_limit", "no_org"]
+      }
+    },
+    "/api/bot/profile": {
+      "get": {
+        "summary": "Perfil del agente y conocimiento",
+        "description": "Lo que el dueño configura en la pantalla Agente: nombre, tono, instrucciones, reglas de escalado, saludo, rol y herramientas encendidas, y la base de conocimiento ya renderizada. Cámbialo y relee: el cerebro no necesita redesplegarse.",
+        "responses": {
+          "200": { "description": "Perfil", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Perfil" } } } },
+          "404": { "description": "Sin perfil todavía." },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" }
+        }
+      }
+    },
+    "/api/bot/llm/{ruta}": {
+      "post": {
+        "summary": "El CRM piensa por el cerebro (proxy compatible con OpenAI)",
+        "description": "036 — Apunta el `base_url` de tu cliente de OpenAI a `{CRM}/api/bot/llm` con `BOT_API_KEY` como llave: el SDK llama a `/api/bot/llm/chat/completions`. El CRM reenvía el cuerpo TAL CUAL al proveedor de Ajustes → IA (o `OPENROUTER_*` de respaldo) con la llave del negocio y devuelve la respuesta del proveedor tal cual, con su código. La llave de IA nunca sale del CRM. Un 401 o 402 del proveedor pausa la llave en Ajustes → IA. Usa el modelo que dice `llm.model` del perfil.",
+        "security": [{ "botKey": [] }, { "botBearer": [] }],
+        "parameters": [
+          { "name": "ruta", "in": "path", "required": true, "description": "Lo que el SDK añade a su `base_url`: `chat/completions` hoy. Comodín: puede llevar `/`.", "schema": { "type": "string" }, "examples": { "chat": { "value": "chat/completions" } } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "description": "El cuerpo de la API del proveedor (OpenAI-compatible). El CRM no lo interpreta." } } } },
+        "responses": {
+          "200": { "description": "La respuesta del proveedor, tal cual. Cualquier otro código del proveedor (400, 401, 429…) también pasa tal cual." },
+          "401": { "description": "Sin `BOT_API_KEY` válida (o el proveedor rechazó la llave del negocio: la respuesta es la suya y la llave queda pausada)." },
+          "402": { "description": "`sin_credencial`: no hay proveedor de IA configurado, o la llave está pausada. El cerebro no tiene con qué pensar.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" },
+          "504": { "description": "`proveedor_sin_respuesta`: el proveedor no contestó en 120 s o no se pudo hablar con él. No pausa la llave.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/bot/ficha": {
+      "put": {
+        "summary": "Guardar lo que el cerebro aprende del cliente",
+        "description": "Claves libres, mezcladas con las que ya hay; `null` borra una clave. Guardar la ficha no mueve la etapa: para eso está `POST /api/bot/stage`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId", "ficha"], "properties": { "conversationId": { "type": "string" }, "ficha": { "type": "object", "additionalProperties": true } } } } } },
+        "responses": {
+          "200": { "description": "Ficha resultante", "content": { "application/json": { "schema": { "type": "object", "properties": { "ficha": { "type": "object", "additionalProperties": true } } } } } },
+          "404": { "$ref": "#/components/responses/NoEncontrada" },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      }
+    },
+    "/api/bot/stage": {
+      "post": {
+        "summary": "Mover al lead a una etapa siguiente del pipeline",
+        "description": "038 — Solo hacia adelante y a etapas abiertas: las de `lead.nextStages` del contexto. Ganar o perder un trato lo decide una persona. Exige la herramienta `etapa` encendida en el perfil y la IA activa en la conversación. Pedir la etapa actual es 200 con `changed: false` y no anota nada: reintentar es inocuo. Cada movimiento queda en la bitácora de etapas como hecho por el bot.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId", "stage"], "properties": { "conversationId": { "type": "string" }, "stage": { "type": "string", "description": "Nombre de la etapa (sin distinguir mayúsculas) o su id", "examples": ["Calificado"] } } } } } },
+        "responses": {
+          "200": { "description": "Hecho, o ya estaba ahí (`changed: false`)", "content": { "application/json": { "schema": { "type": "object", "required": ["ok", "changed", "lead"], "properties": { "ok": { "const": true }, "changed": { "type": "boolean" }, "lead": { "type": "object", "properties": { "id": { "type": "string" }, "stageName": { "type": "string" } } } } } } } },
+          "404": { "description": "`not_found`: no existe la conversación. `sin_lead`: el contacto no tiene lead en el pipeline.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "`ai_paused` (una persona tomó la conversación), `herramienta_apagada` (`etapa` no está en `tools`), `etapa_no_permitida` (hacia atrás, ganada o perdida; el mensaje lista las válidas) o `no_org`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "`etapa_desconocida` (el mensaje lista las válidas) o cuerpo inválido.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        },
+        "x-codigos-409": ["ai_paused", "herramienta_apagada", "etapa_no_permitida", "no_org"]
+      }
+    },
+    "/api/bot/handoff": {
+      "post": {
+        "summary": "Pasar la conversación a una persona",
+        "description": "Pausa la IA en esa conversación. Despídete ANTES: después, `/api/bot/messages` responde 409 `ai_paused`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId"], "properties": { "conversationId": { "type": "string" }, "reason": { "type": "string", "enum": ["cliente", "modelo", "error", "ventana", "hostilidad"] } } } } } },
+        "responses": {
+          "200": { "description": "Hecho", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } } } },
+          "404": { "$ref": "#/components/responses/NoEncontrada" },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      }
+    },
+    "/api/bot/typing": {
+      "post": {
+        "summary": "Marcar leído y «escribiendo…»",
+        "description": "Best-effort: responde 200 aunque no se pudo (`ok: false` con el motivo).",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId"], "properties": { "conversationId": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "Resultado", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "reason": { "type": "string", "enum": ["sandbox", "ai_paused", "no_inbound", "meta_error"] } }, "required": ["ok"] } } } },
+          "404": { "$ref": "#/components/responses/NoEncontrada" },
+          "409": { "description": "`no_org` o `no_connection`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/bot/media/{mediaId}": {
+      "get": {
+        "summary": "Descargar un adjunto entrante",
+        "description": "El `mediaId` que trae el mensaje del despacho. Devuelve el binario con su `content-type`; el token de WhatsApp no sale del CRM.",
+        "parameters": [{ "name": "mediaId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "El archivo", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "409": { "description": "`no_org` o `no_connection`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      }
+    },
+    "/api/bot/reset": {
+      "post": {
+        "summary": "Reiniciar una conversación de pruebas",
+        "description": "Ficha limpia, IA reactivada y etapa al inicio. Para las líneas de prueba del dueño.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId"], "properties": { "conversationId": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "Hecho", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } } } },
+          "404": { "$ref": "#/components/responses/NoEncontrada" },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" }
+        }
+      }
+    },
+    "/api/bot/availability": {
+      "get": {
+        "summary": "Horarios para ofrecer (con la agenda encendida)",
+        "description": "Los horarios libres, que quedan REGISTRADOS como ofrecidos a esa conversación: después solo se puede reservar uno de ellos. Con la bandera `AGENDA` apagada responde 404 vacío (sin cuerpo).",
+        "parameters": [
+          { "name": "conversationId", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "perDay", "in": "query", "schema": { "type": "integer" } },
+          { "name": "days", "in": "query", "schema": { "type": "integer" } },
+          { "name": "date", "in": "query", "description": "AAAA-MM-DD: todas las horas libres de ese día.", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Horarios", "content": { "application/json": { "schema": { "type": "object", "properties": { "slots": { "type": "array", "items": { "$ref": "#/components/schemas/Hueco" } }, "diasConAgenda": { "type": "array", "items": { "type": "string" } }, "query": { "type": "object", "additionalProperties": true } } } } } },
+          "404": { "description": "Vacío: la instancia no tiene agenda. Con cuerpo de error: no existe la conversación." },
+          "409": { "$ref": "#/components/responses/SinOrganizacion" },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      }
+    },
+    "/api/bot/bookings": {
+      "post": {
+        "summary": "Reservar una cita (con la agenda encendida)",
+        "description": "Solo un horario que se le ofreció a esa conversación.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId", "startUtc"], "properties": { "conversationId": { "type": "string" }, "startUtc": { "type": "string", "format": "date-time" }, "notes": { "type": ["string", "null"] } } } } } },
+        "responses": {
+          "201": { "description": "Reservada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Cita" } } } },
+          "404": { "description": "Sin agenda (vacío) o no existe la conversación." },
+          "409": { "$ref": "#/components/responses/ConflictoDeAgenda" },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      },
+      "patch": {
+        "summary": "Mover la próxima cita (con la agenda encendida)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId", "startUtc"], "properties": { "conversationId": { "type": "string" }, "startUtc": { "type": "string", "format": "date-time" } } } } } },
+        "responses": {
+          "200": { "description": "Movida", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Cita" } } } },
+          "404": { "description": "Sin agenda (vacío), o no hay cita que mover." },
+          "409": { "$ref": "#/components/responses/ConflictoDeAgenda" },
+          "422": { "$ref": "#/components/responses/Invalido" }
+        }
+      }
+    },
+    "/api/bot/openapi.json": {
+      "get": {
+        "summary": "Este documento",
+        "security": [],
+        "responses": { "200": { "description": "El OpenAPI de la instancia", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    }
+  },
+  "webhooks": {
+    "despacho": {
+      "post": {
+        "summary": "El CRM le despacha una ráfaga al cerebro",
+        "description": "A `BRAIN_DISPATCH_URL`, firmado. Una ráfaga = lo que el cliente dijo desde la última respuesta (hasta 20 mensajes). Contesta 2xx en cuanto lo guardes y piensa después: el CRM espera 20 s. Deduplica por `dispatchId` (reintentos del mismo despacho) y por `messages[].id` (el mismo mensaje puede venir en dos despachos). Un cuerpo con `type` no es un turno: ver `olvido`.",
+        "parameters": [
+          { "name": "x-vocero-signature", "in": "header", "required": true, "description": "`sha256=` + HMAC-SHA256 hex del cuerpo CRUDO con `BOT_API_KEY`. Verifica antes de parsear.", "schema": { "type": "string" } },
+          { "name": "x-vocero-dispatch-id", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "x-vocero-organization", "in": "header", "required": true, "description": "Slug de la organización, o su id si no tiene.", "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Despacho" }, "examples": { "gemelo": { "summary": "El cuerpo fijado en las pruebas gemelas (firma con la llave `llave-de-prueba-del-contrato-0001`: sha256=885074513a6fbd7e2d4443e7f45e3837246effed6c9efa596260057f4dd9008d)", "value": { "dispatchId": "dsp_prueba0000000000001", "organization": { "id": "org_prueba", "slug": "mi-negocio" }, "conversation": { "id": "cv_prueba", "channel": "whatsapp", "aiEnabled": true, "windowOpen": true, "windowExpiresAt": "2026-10-09T05:10:11.000Z" }, "contact": { "id": "ct_prueba", "displayName": "Ana Pérez", "identity": "5215512345678" }, "messages": [{ "id": "msg_1", "at": "2026-10-08T05:10:03.000Z", "type": "text", "text": "hola, ¿tienen el modelo azul?", "mediaId": null }, { "id": "msg_2", "at": "2026-10-08T05:10:11.000Z", "type": "image", "text": null, "mediaId": "1234567890", "mimeType": "image/jpeg", "caption": "este" }], "firstMessageAt": "2026-10-08T05:10:03.000Z", "lastMessageAt": "2026-10-08T05:10:11.000Z" } } } } } },
+        "responses": {
+          "2XX": { "description": "Recibido. No significa «ya contesté»." },
+          "4XX": { "description": "No se reintenta: la conversación pasa a una persona. 429 sí se reintenta." },
+          "5XX": { "description": "Se reintenta (3 intentos en total, ~1 s y ~4 s); agotados, a una persona con motivo `error`." }
+        }
+      }
+    },
+    "olvido": {
+      "post": {
+        "summary": "El CRM le pide al cerebro que olvide una conversación eliminada",
+        "description": "Misma URL y misma firma que el despacho, con `x-vocero-event: conversation.deleted` y sin `x-vocero-dispatch-id`. Borra lo que guardes de esa conversación y contesta 2xx. Se intenta una vez. También llega al terminar cada caso del Laboratorio.",
+        "parameters": [
+          { "name": "x-vocero-signature", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "x-vocero-event", "in": "header", "required": true, "schema": { "type": "string", "enum": ["conversation.deleted"] } },
+          { "name": "x-vocero-organization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Olvido" }, "examples": { "gemelo": { "summary": "El cuerpo fijado en las pruebas gemelas (firma con `secreto-gemelo-del-olvido`: sha256=72adddfb8dbc0ad6f091adff55132be228ec4be16be05fb4dde9b34010b65ffa)", "value": { "type": "conversation.deleted", "eventId": "olv_gemelo1", "organization": { "id": "org_gemela", "slug": "gemela" }, "conversation": { "id": "cv_gemela1", "channel": "whatsapp" }, "contact": { "id": "ct_gemelo1", "identity": "5215550001111" }, "deletedAt": "2026-10-04T12:00:00.000Z" } } } } } },
+        "responses": { "2XX": { "description": "Olvidado." } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "botKey": { "type": "apiKey", "in": "header", "name": "X-API-Key", "description": "`BOT_API_KEY` del CRM. Es también la llave con que el CRM firma el despacho." },
+      "botBearer": { "type": "http", "scheme": "bearer", "description": "036 — La misma `BOT_API_KEY`, como `Authorization: Bearer`: es lo que manda el SDK de OpenAI que apunta su `base_url` a `/api/bot/llm`. Vale en todas las rutas de `/api/bot/*`." }
+    },
+    "responses": {
+      "NoEncontrada": { "description": "No existe la conversación.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "SinOrganizacion": { "description": "`no_org`: la instancia aún no tiene organización.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Invalido": { "description": "Cuerpo o parámetros inválidos.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "ConflictoDeAgenda": { "description": "`slot_taken` (se ocupó) o `slot_not_offered` (no se le ofreció a esta conversación); trae `slots` frescos para volver a ofrecer.", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/Error" }, { "type": "object", "properties": { "slots": { "type": "array", "items": { "$ref": "#/components/schemas/Hueco" } } } }] } } } }
+    },
+    "schemas": {
+      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string" } } } } },
+      "Ok": { "type": "object", "properties": { "ok": { "type": "boolean" } } },
+      "Canal": { "type": "string", "description": "Informativo: la lista crece. No hagas un switch exhaustivo.", "examples": ["whatsapp", "instagram", "messenger", "tiktok"] },
+      "Contexto": {
+        "type": "object",
+        "properties": {
+          "contact": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": ["string", "null"] }, "identity": { "type": "string" }, "waIdentity": { "type": "string" }, "channel": { "$ref": "#/components/schemas/Canal" }, "phone": { "type": ["string", "null"] }, "ficha": { "type": "object", "additionalProperties": true } } },
+          "conversation": { "type": "object", "properties": { "id": { "type": "string" }, "aiEnabled": { "type": "boolean" }, "handoffAt": { "type": ["string", "null"] }, "windowOpen": { "type": "boolean" }, "windowRemainingMs": { "type": ["integer", "null"] } } },
+          "lead": { "type": ["object", "null"], "properties": { "id": { "type": "string" }, "stageName": { "type": "string" }, "nextStages": { "type": "array", "description": "038 — A qué etapas puede moverlo el cerebro con `POST /api/bot/stage`: las abiertas después de la actual, en el orden del pipeline. Vacía en la última abierta o en una de cierre.", "items": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "string" }, "name": { "type": "string" } } } } } },
+          "adOrigen": { "type": ["object", "null"], "description": "031 — De qué anuncio llegó la persona.", "properties": { "headline": { "type": ["string", "null"] }, "body": { "type": ["string", "null"] }, "sourceType": { "type": ["string", "null"] }, "sourceUrl": { "type": ["string", "null"] }, "hasCtwaClid": { "type": "boolean" }, "capturedAt": { "type": "string" } } },
+          "booking": { "type": "object", "description": "Solo con la agenda encendida.", "additionalProperties": true }
+        }
+      },
+      "Perfil": {
+        "type": "object",
+        "properties": {
+          "profile": { "type": "object", "properties": { "name": { "type": "string" }, "tone": { "type": ["string", "null"] }, "instructions": { "type": ["string", "null"] }, "escalationRules": { "type": ["string", "null"] }, "greeting": { "type": ["string", "null"] }, "role": { "type": "string", "description": "034 — El rol del agente.", "examples": ["calificador"] }, "tools": { "type": "array", "description": "034 — Las herramientas encendidas. `escalar` siempre. Sin la llave, enciende todas.", "items": { "type": "string", "enum": ["ficha", "etapa", "agendar", "reprogramar", "salida", "escalar"] } } } },
+          "kb": { "type": "string" },
+          "resources": { "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string" }, "url": { "type": "string" } } } },
+          "llm": {
+            "description": "036 — Con qué piensa un cerebro sin llave propia: `path` es el proxy (`/api/bot/llm`) y `model`, el modelo que eligió el negocio en Ajustes → IA. `null` sin proveedor de IA configurado o con la llave pausada.",
+            "oneOf": [
+              { "type": "object", "required": ["path", "model"], "properties": { "path": { "type": "string", "examples": ["/api/bot/llm"] }, "model": { "type": "string", "examples": ["openai/gpt-4o-mini"] } } },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "Hueco": { "type": "object", "properties": { "startUtc": { "type": "string" }, "endUtc": { "type": "string" }, "label": { "type": "string" }, "dayIso": { "type": "string" }, "dayLabel": { "type": "string" }, "time": { "type": "string" } } },
+      "Cita": { "type": "object", "properties": { "bookingId": { "type": "string" }, "meetingLink": { "type": ["string", "null"] }, "linkPending": { "type": "boolean", "description": "La cita existe pero el enlace llega después: no prometas uno que no tienes." }, "label": { "type": "string" } } },
+      "Mensaje": {
+        "type": "object",
+        "required": ["id", "at", "type", "text", "mediaId"],
+        "properties": {
+          "id": { "type": "string" },
+          "at": { "type": "string", "format": "date-time" },
+          "type": { "type": "string" },
+          "text": { "type": ["string", "null"] },
+          "mediaId": { "type": ["string", "null"], "description": "Se descarga por `GET /api/bot/media/{mediaId}`." },
+          "mimeType": { "type": ["string", "null"], "description": "Solo con adjunto." },
+          "caption": { "type": ["string", "null"], "description": "Solo con adjunto." },
+          "fileName": { "type": "string", "description": "031 — Solo con adjunto que trae nombre." },
+          "location": { "type": "object", "description": "031 — Solo si `type` es `location`.", "required": ["latitude", "longitude"], "properties": { "latitude": { "type": "number" }, "longitude": { "type": "number" }, "name": { "type": "string" }, "address": { "type": "string" } } },
+          "contacts": { "type": "array", "description": "031 — Solo si `type` es `contacts`.", "items": { "type": "object", "properties": { "name": { "type": "string" } } } }
+        }
+      },
+      "Despacho": {
+        "type": "object",
+        "required": ["dispatchId", "organization", "conversation", "contact", "messages", "firstMessageAt", "lastMessageAt"],
+        "properties": {
+          "dispatchId": { "type": "string" },
+          "organization": { "type": "object", "properties": { "id": { "type": "string" }, "slug": { "type": ["string", "null"] } } },
+          "conversation": { "type": "object", "required": ["id", "channel", "aiEnabled", "windowOpen", "windowExpiresAt"], "properties": { "id": { "type": "string" }, "channel": { "$ref": "#/components/schemas/Canal" }, "aiEnabled": { "type": "boolean" }, "windowOpen": { "type": "boolean" }, "windowExpiresAt": { "type": ["string", "null"] }, "test": { "const": true, "description": "033 — Solo en una corrida del Laboratorio: la respuesta se guarda sin enviarse; no filtres por tu lista de permitidos ni programes seguimiento." } } },
+          "contact": { "type": "object", "properties": { "id": { "type": "string" }, "displayName": { "type": "string" }, "identity": { "type": "string" } } },
+          "messages": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/components/schemas/Mensaje" } },
+          "firstMessageAt": { "type": "string" },
+          "lastMessageAt": { "type": "string" }
+        }
+      },
+      "Olvido": {
+        "type": "object",
+        "required": ["type", "eventId", "organization", "conversation", "contact", "deletedAt"],
+        "properties": {
+          "type": { "const": "conversation.deleted" },
+          "eventId": { "type": "string" },
+          "organization": { "type": "object", "properties": { "id": { "type": "string" }, "slug": { "type": ["string", "null"] } } },
+          "conversation": { "type": "object", "properties": { "id": { "type": "string" }, "channel": { "$ref": "#/components/schemas/Canal" } } },
+          "contact": { "type": "object", "properties": { "id": { "type": "string" }, "identity": { "type": "string" } } },
+          "deletedAt": { "type": "string" }
+        }
+      }
+    }
+  }
+}

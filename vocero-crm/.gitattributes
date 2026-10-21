@@ -1,0 +1,3 @@
+# Los scripts de shell corren dentro del contenedor (Linux): con CRLF, `sh` no
+# los ejecuta. Siempre LF, también en checkouts de Windows con autocrlf.
+*.sh text eol=lf

@@ -1,0 +1,1 @@
+ALTER TABLE "dispatch" ADD COLUMN "message_ids" jsonb;

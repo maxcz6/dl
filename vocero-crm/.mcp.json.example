@@ -1,0 +1,18 @@
+{
+  "//": "EJEMPLO de MCP scoped al proyecto. Copia las entradas que necesites a .mcp.json (que arranca vacío) o usa `claude mcp add` (recomendado). Los ${VAR} se resuelven desde tu entorno / .env — NUNCA pongas tokens en claro aquí. Ver docs/mcp-setup.md.",
+
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}

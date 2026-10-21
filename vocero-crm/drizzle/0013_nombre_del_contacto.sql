@@ -1,0 +1,17 @@
+-- 003/#51 - De donde viene el nombre de un contacto.
+--
+-- `perfil` = lo trajo WhatsApp y se mantiene al dia solo.
+-- `manual` = lo escribio una persona en el CRM y no se pisa nunca.
+--
+-- Las filas que ya existian quedan en 'perfil' A PROPOSITO, y tiene un coste
+-- que conviene saber: un contacto al que el operador renombro a mano ANTES de
+-- esta migracion se actualizara una vez con el nombre de su perfil de
+-- WhatsApp. Se elige asi porque la inmensa mayoria de los contactos se
+-- crearon con el nombre del perfil y nunca se tocaron: dejarlos en 'manual'
+-- haria que la correccion no arreglara el caso reportado para practicamente
+-- nadie. En cuanto alguien vuelva a editar un nombre, queda 'manual' para
+-- siempre.
+--
+-- Si se prefiere lo conservador, basta correr esto ANTES de desplegar:
+--   UPDATE "contact" SET "name_source" = 'manual';
+ALTER TABLE "contact" ADD COLUMN "name_source" text DEFAULT 'perfil' NOT NULL;

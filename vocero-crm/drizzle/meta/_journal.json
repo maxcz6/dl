@@ -1,0 +1,160 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783657511753,
+      "tag": "0000_absurd_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785464517783,
+      "tag": "0001_old_sabra",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785872764254,
+      "tag": "0002_closed_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786835958011,
+      "tag": "0003_flippant_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786849014992,
+      "tag": "0004_reflective_the_enforcers",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786850050625,
+      "tag": "0005_glossy_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786855153169,
+      "tag": "0006_keen_thor_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786856261073,
+      "tag": "0007_confused_zaran",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787000000000,
+      "tag": "0008_canal_instagram",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787796724315,
+      "tag": "0009_motor_agenda",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787960052077,
+      "tag": "0010_atribucion_capi",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788309200954,
+      "tag": "0011_canal_messenger",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788310823966,
+      "tag": "0012_messenger_zernio",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788731118597,
+      "tag": "0013_nombre_del_contacto",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790048470717,
+      "tag": "0014_anuncio_de_origen",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791426906573,
+      "tag": "0015_token_de_ia",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791469451742,
+      "tag": "0016_despacho_al_cerebro",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791914626123,
+      "tag": "0017_dispatch_message_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791918147335,
+      "tag": "0018_canal_tiktok",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791947815503,
+      "tag": "0019_contact_ai_paused",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791987903930,
+      "tag": "0020_secreto_zernio_cifrado",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792517498460,
+      "tag": "0021_roles_como_datos",
+      "breakpoints": true
+    }
+  ]
+}

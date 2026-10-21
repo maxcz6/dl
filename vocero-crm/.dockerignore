@@ -1,0 +1,23 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+*.log
+coverage
+.playwright-mcp
+docs
+# 035: el OpenAPI se importa en /api/bot/openapi.json y entra al build.
+!docs/openapi.json
+specs
+memory
+tests
+Dockerfile
+docker-compose*.yml
+Caddyfile
+README.md
+INSTALL-IA.md
+# #82: el migrador (drizzle-orm) solo abre meta/_journal.json y los *.sql;
+# los *_snapshot.json de meta/ son de `drizzle-kit generate` y pesan ~1.2 MB.
+drizzle/meta/*
+!drizzle/meta/_journal.json

@@ -1,0 +1,46 @@
+# --- Secretos (NUNCA al control de versiones) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- MCP local con tokens (si lo personalizas con secretos en claro) ---
+# .mcp.json se commitea SOLO si usa ${VAR} (sin tokens en claro). Si metes
+# secretos directos, ignóralo y deja únicamente .mcp.json.example.
+# .mcp.json
+
+# --- Dependencias / build (cuando el starter ya tenga app encima) ---
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# --- Logs y temporales ---
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.cache/
+tmp/
+.tmp/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Claude Code: estado local (no compartir) ---
+# La memoria de subagentes (.claude/agent-memory/) SÍ se versiona (es memoria de
+# proyecto compartida con el equipo). La config local de la sesión, no:
+.claude/settings.local.json
+.playwright-mcp/
+.tmp-seed-demo.mjs
+# Bundles de pnpm init-env / pnpm doctor (esbuild)
+.tmp-*.mjs
+.dev-media/
+# Capturas y salidas de los self-tests (p. ej. scripts/e2e-responsive.mjs)
+scratch/

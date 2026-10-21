@@ -1,0 +1,90 @@
+# ============================================================
+# Vocero CRM — fly.toml (docs.fly.io/reference/configuration)
+#
+# 2.0 — El agente (Nea) es otra app de Fly al lado: `fly launch --image
+# ghcr.io/kevinrivm/nea-agent:2.0.0 --no-public-ips` con CRM_BASE_URL hacia
+# esta app por la red privada (http://<app>.internal:3000), la misma
+# DATABASE_URL con DATABASE_SCHEMA=nea, CRM_BOT_API_KEY = BOT_API_KEY de aquí y
+# su LLM_API_KEY. Aquí, BRAIN_DISPATCH_URL=http://<nea>.internal:8000/vocero/dispatch.
+# Guía: docs/migrar-a-2.0.md.
+#
+# Una Machine desde la imagen publicada (sin build en Fly), un volumen en
+# /data y el healthcheck de la app. Este archivo declara la imagen, el
+# puerto, el volumen, el healthcheck, el tamaño de la máquina y las variables
+# que no son secretas. Fly no deja poner en él ni secretos ni la base: eso
+# queda a mano, una vez, desde un clon del repo (cada comando y cada bandera
+# existen tal cual en docs.fly.io/flyctl):
+#
+#   fly apps create vocero-crm            # nombre único en todo Fly: si está
+#                                         # tomado, cambia `app` y APP_BASE_URL
+#   fly volumes create vocero_data --app vocero-crm --region qro --size 1 --yes
+#   fly postgres create --name vocero-db --region qro \
+#     --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 1
+#   fly postgres attach vocero-db --app vocero-crm        # deja DATABASE_URL como secreto
+#   fly secrets set --stage --app vocero-crm \
+#     BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+#     ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+#     META_WEBHOOK_VERIFY_TOKEN="$(openssl rand -hex 32)"
+#   fly deploy --ha=false                 # una sola máquina: hay un solo volumen
+#   curl -s https://vocero-crm.fly.dev/api/health
+#
+# Postgres: `fly postgres create` levanta el Postgres NO gestionado de Fly
+# (barato; Fly avisa que ya no lo mantiene ni da soporte). El gestionado es
+# `fly mpg create --name vocero-db --region qro --plan Basic` y luego
+# `fly mpg attach <id del cluster> --app vocero-crm` (el id lo enseña
+# `fly mpg list`). Los dos `attach` dejan DATABASE_URL como secreto de la app.
+#
+# Opcionales después: OPENROUTER_API_TOKEN, META_APP_SECRET y BOT_API_KEY con
+# `fly secrets set`; OPENROUTER_MODEL, AGENDA, CHANNELS y ATRIBUCION en [env].
+#
+# - La máquina no se apaga sola (auto_stop_machines = "off"): el agente, el
+#   Laboratorio y el SSE corren dentro del proceso, y una máquina dormida los
+#   corta a la mitad.
+# - El volumen se monta como root; el entrypoint de la imagen se lo da al
+#   usuario de la app en cada arranque. MEDIA_DIR no se define: la imagen ya
+#   trae /data/media.
+# - 037: si prefieres no atar los adjuntos al volumen de una Machine,
+#   MEDIA_STORE=bucket y las MEDIA_BUCKET_* (`fly secrets set`) los mandan a
+#   un bucket S3-compatible (Tigris, R2, S3). Ver .env.example.
+# - La imagen va fijada a la versión (una prueba lo exige): actualizar es
+#   cambiar la etiqueta y `fly deploy`. Las migraciones corren al arrancar.
+# ============================================================
+
+app = "vocero-crm"
+# Querétaro (México). Otras: `fly platform regions`. El volumen y la base se
+# crean en esta misma región.
+primary_region = "qro"
+
+[build]
+  image = "ghcr.io/kevinrivm/vocero-crm:2.0.0"
+
+[env]
+  # No es secreta y depende del nombre de la app: cámbiala junto con `app`, o
+  # por tu dominio propio tras `fly certs add`. De ella sale la URL del webhook.
+  APP_BASE_URL = "https://vocero-crm.fly.dev"
+  META_GRAPH_API_VERSION = "v25.0"
+
+[[mounts]]
+  source = "vocero_data"
+  destination = "/data"
+  # Si no existe ningún volumen, `fly deploy` crea uno de este tamaño.
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Nunca se apaga sola; si alguien la para, la siguiente petición la levanta.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+
+  [[http_service.checks]]
+    # grace_period amplio: cubre las migraciones del arranque.
+    grace_period = "40s"
+    interval = "15s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

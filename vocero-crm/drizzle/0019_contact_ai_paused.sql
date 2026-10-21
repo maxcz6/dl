@@ -1,0 +1,1 @@
+ALTER TABLE "contact" ADD COLUMN "ai_paused" boolean DEFAULT false NOT NULL;

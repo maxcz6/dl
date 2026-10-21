@@ -1,0 +1,9 @@
+# HTTPS automático con el dominio de la variable DOMAIN.
+# Para pruebas locales usa DOMAIN=localhost (certificado interno).
+{$DOMAIN} {
+	reverse_proxy app:3000 {
+		# SSE: sin buffering ni timeouts cortos en el proxy
+		flush_interval -1
+	}
+	encode gzip
+}

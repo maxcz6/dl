@@ -1,0 +1,91 @@
+name: CI
+
+# Los cuatro gates del proyecto, corridos por una máquina en cada PR.
+#
+# Existe sobre todo por los PRs de fuera: quien manda uno no tiene la base de
+# datos ni el `.env` de nadie, así que hoy la única forma de saber si su cambio
+# sirve es que un humano lo clone y lo corra a mano. Con esto, el resultado
+# llega pegado al PR y el colaborador lo ve antes que el mantenedor.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Tres pushes seguidos a un PR no necesitan tres corridas: manda la última.
+# En `main` no se cancela nada — ahí el historial de qué pasó importa.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Solo lectura: ninguno de estos pasos escribe en el repo, y un PR desde un
+# fork ajeno no debe recibir un token que pueda hacerlo.
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: ${{ matrix.config.name }} · typecheck · lint · test · build
+    runs-on: ubuntu-latest
+
+    # Los módulos opcionales (canales, agenda) se encienden con variables de
+    # despliegue, así que el código que viaja en main tiene que servir en las
+    # dos configuraciones — y eso no se sabe corriendo solo una.
+    #
+    # `default` es lo que instala la mayoría: sin canales extra y sin agenda.
+    # `completo` es todo encendido. Entre las dos se cubre lo que las banderas
+    # prometen: que apagadas no estorban y encendidas funcionan.
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: default
+            channels: ""
+            agenda: ""
+          - name: completo
+            channels: "whatsapp,instagram,messenger,tiktok"
+            agenda: "on"
+
+    env:
+      CHANNELS: ${{ matrix.config.channels }}
+      AGENDA: ${{ matrix.config.agenda }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Antes que setup-node, porque su caché necesita pnpm ya instalado.
+      # La versión sale de `packageManager` en package.json y no se repite
+      # aquí: duplicarla es tenerla desactualizada en uno de los dos lados.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # `--frozen-lockfile` falla si el lockfile no cuadra con package.json,
+      # en vez de resolver otras versiones en silencio y probar algo que nadie
+      # va a instalar.
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      # Los cuatro corren AUNQUE uno falle. Es a propósito: si se detuviera en
+      # el primero, arreglar tres cosas costaría tres vueltas de ida y vuelta a
+      # alguien que no puede reproducirlas en su máquina. Una corrida, la lista
+      # completa.
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: pnpm lint
+
+      - name: test
+        if: ${{ !cancelled() }}
+        run: pnpm test
+
+      # Va al final porque es el más lento, y porque ya atrapó cosas que los
+      # otros tres no ven: Next rechaza exports que no son handlers en un
+      # `route.ts`, y eso solo aparece al construir.
+      - name: build
+        if: ${{ !cancelled() }}
+        run: pnpm build

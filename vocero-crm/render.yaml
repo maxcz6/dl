@@ -1,0 +1,129 @@
+# ============================================================
+# Vocero CRM — Blueprint de Render (render.com/docs/blueprint-spec)
+#
+# Un servicio web desde la imagen publicada (sin build en Render), una base
+# Postgres gestionada y un disco persistente en /data. Se aplica desde el
+# panel (New → Blueprint sobre tu fork) o con el botón del README sobre este
+# repo. Es el manifest más completo de los tres: declara puerto, healthcheck,
+# disco, base y las variables obligatorias, y Render genera los secretos.
+#
+# Queda a mano, una vez: pegar META_WEBHOOK_VERIFY_TOKEN cuando Render lo pida
+# al crear el Blueprint (`openssl rand -hex 32`; ver abajo por qué no se
+# genera solo), y después, en el panel, el token de OpenRouter y, con dominio
+# propio, APP_BASE_URL. Verifica con:
+#
+#   curl -s https://<servicio>.onrender.com/api/health
+#
+# - Un disco exige plan de pago (el `free` no lo admite) y una base `free`
+#   caduca a los 30 días: `starter` para la app y `basic-256mb` para la base
+#   son los más baratos que sirven.
+# - Render ignora el HEALTHCHECK del Dockerfile (usa healthCheckPath) y mete
+#   PORT=10000 por defecto, así que se fija PORT=3000, el de la imagen.
+# - La imagen va fijada a la versión (como en docker-compose.yml; una prueba
+#   lo exige): actualizar es cambiar la etiqueta y sincronizar el Blueprint,
+#   o «Manual Deploy → Deploy latest reference». Un servicio desde imagen no
+#   se redespliega solo cuando la etiqueta cambia en GHCR.
+# - El disco se monta como root; el entrypoint de la imagen se lo da al
+#   usuario de la app en cada arranque. MEDIA_DIR no se define: la imagen ya
+#   trae /data/media, dentro del disco.
+# - 037: sin disco (o con varias instancias), los adjuntos pueden ir a un
+#   bucket S3-compatible: MEDIA_STORE=bucket y las MEDIA_BUCKET_* (ver
+#   .env.example). Entonces el disco deja de ser obligatorio para los
+#   adjuntos.
+# ============================================================
+services:
+  - type: web
+    name: vocero
+    runtime: image
+    image:
+      # Pública: sin `creds`. Es linux/amd64, lo único que corre Render.
+      url: ghcr.io/kevinrivm/vocero-crm:2.0.0
+    plan: starter
+    # Misma región para el servicio y la base; no se cambia después.
+    # region: oregon   # ohio · virginia · frankfurt · singapore
+    healthCheckPath: /api/health
+    disk:
+      name: vocero-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: APP_BASE_URL
+        # La URL .onrender.com del propio servicio. Con dominio propio,
+        # cámbiala en el panel: de ella sale la URL del webhook.
+        fromService:
+          type: web
+          name: vocero
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vocero-db
+          property: connectionString
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        # Render genera 256 bits en base64 (44 caracteres): exactamente los
+        # 32 bytes que exige src/lib/env.ts.
+        generateValue: true
+      - key: META_WEBHOOK_VERIFY_TOKEN
+        # NO se genera: el valor es un segmento de la URL del webhook
+        # (/api/webhooks/wa/<token>) y el generador de Render da base64, que
+        # trae `/`. Render lo pide al crear el Blueprint: openssl rand -hex 32
+        sync: false
+      - key: META_GRAPH_API_VERSION
+        value: v25.0
+      # 2.0 — El agente (Nea, el servicio `vocero-nea` de abajo). La llave
+      # firma el despacho y con ella Nea le contesta al CRM: se genera aquí y
+      # Nea la toma de este servicio.
+      - key: BOT_API_KEY
+        generateValue: true
+      - key: BRAIN_DISPATCH_URL
+        value: http://vocero-nea:8000/vocero/dispatch
+      - key: BRAIN_HEALTH_URL
+        value: http://vocero-nea:8000/health
+      # Opcionales, cuando los tengas (guía en .env.example):
+      # - key: OPENROUTER_API_TOKEN
+      #   sync: false
+      # - key: OPENROUTER_MODEL
+      #   value: anthropic/claude-sonnet-4.5
+      # - key: META_APP_SECRET
+      #   sync: false
+      # - key: AGENDA
+      #   value: "on"
+
+  # 2.0 — El agente, servicio privado sobre la misma base (esquema `nea`).
+  # Sin llave de IA: piensa por el CRM con la de Ajustes → IA. Sin disco ni
+  # dominio. Guía: docs/migrar-a-2.0.md.
+  - type: pserv
+    name: vocero-nea
+    runtime: image
+    image:
+      url: ghcr.io/kevinrivm/nea-agent:2.0.0
+    plan: starter
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: CRM_BASE_URL
+        value: http://vocero:3000
+      - key: CRM_BOT_API_KEY
+        fromService:
+          type: web
+          name: vocero
+          envVarKey: BOT_API_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vocero-db
+          property: connectionString
+      - key: DATABASE_SCHEMA
+        value: nea
+
+databases:
+  - name: vocero-db
+    databaseName: vocero
+    user: vocero
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    # region: oregon   # la misma que el servicio
+    # Solo la red privada de Render: sin esto, la base acepta cualquier IP.
+    ipAllowList: []
